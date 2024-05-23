@@ -53,6 +53,7 @@ class RunConfig:
     n_splits: int = 4
     which_one: int = 1
     eval_output_path: Path = Path('./outputs/eval')
+    weight_loss: int = 100
 
 
     def __post_init__(self):

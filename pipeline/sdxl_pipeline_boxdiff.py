@@ -33,6 +33,8 @@ def aggregate_attention(attention_store: AttentionStore,
     for location in from_where:
         for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
             if item.shape[1] == num_pixels:
+                # head = 20
+                item = item[20:,...] # remove unconditional branch
                 cross_maps = item.reshape(1, -1, res, res, item.shape[-1])[select]
                 out.append(cross_maps)
     out = torch.cat(out, dim=0)
@@ -481,6 +483,7 @@ class BoxDiffPipeline(StableDiffusionXLPipeline):
         kernel_size: int = 3,
         sd_2_1: bool = False,
         bbox: List[int] = None,
+        weight_loss: int = 100,
         config = None,
     ):
         r"""
@@ -672,6 +675,8 @@ class BoxDiffPipeline(StableDiffusionXLPipeline):
 
         # 8. Denoising loop
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
+        
+        scale_range = np.linspace(scale_range[0], scale_range[1], len(self.scheduler.timesteps))
 
         # 7.1 Apply denoising_end
         if denoising_end is not None and isinstance(denoising_end, float) and denoising_end > 0 and denoising_end < 1:
@@ -690,10 +695,11 @@ class BoxDiffPipeline(StableDiffusionXLPipeline):
                 with torch.enable_grad():
 
                     latents = latents.clone().detach().requires_grad_(True)
+                    latent_model_input = torch.cat([latents] * 2)
 
                     # Forward pass of denoising with text conditioning
-                    noise_pred_text = self.unet(latents, t,
-                                                encoder_hidden_states=prompt_embeds, cross_attention_kwargs=None, added_cond_kwargs=added_cond_kwargs, return_dict=False,).sample
+                    noise_pred_text = self.unet(latent_model_input, t,
+                                                encoder_hidden_states=prompt_embeds, cross_attention_kwargs=None, added_cond_kwargs=added_cond_kwargs, return_dict=True,).sample
                     self.unet.zero_grad()
 
                     # Get max activation value for each subject token
@@ -709,7 +715,8 @@ class BoxDiffPipeline(StableDiffusionXLPipeline):
                         config=config,
                     )
 
-                    if not run_standard_sd:
+                    run_standard_sd = False
+                    if run_standard_sd:
 
                         loss_fg, loss = self._compute_loss(max_attention_per_index_fg, max_attention_per_index_bg, dist_x, dist_y)
 
@@ -735,14 +742,16 @@ class BoxDiffPipeline(StableDiffusionXLPipeline):
                                 config=config,
                             )
 
-                        # Perform gradient update
-                        if i < max_iter_to_alter:
-                            _, loss = self._compute_loss(max_attention_per_index_fg, max_attention_per_index_bg, dist_x, dist_y)
-                            if loss != 0:
-                                latents = self._update_latent(latents=latents, loss=loss,
-                                                              step_size=scale_factor * np.sqrt(scale_range[i]))
+                    # Perform gradient update
+                    if i < max_iter_to_alter:
+                        _, loss = self._compute_loss(max_attention_per_index_fg, max_attention_per_index_bg, dist_x, dist_y)
+                        if loss != 0:
+                            loss = loss * weight_loss
+                            latent_model_input = self._update_latent(latents=latent_model_input, loss=loss,
+                                                            step_size=scale_factor * np.sqrt(scale_range[i]))
+                            latents = latent_model_input[1:,...]
 
-                            # print(f'Iteration {i} | Loss: {loss:0.4f}')
+                            print(f'Iteration {i} | Loss: {loss:0.4f}')
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
