@@ -29,7 +29,7 @@ def load_model(config: RunConfig):
         # If you cannot access the huggingface on your server, you can use the local prepared one.
         # stable_diffusion_version = "../../packages/huggingface/hub/stable-diffusion-v1-4"
     print(f"Loading model from {stable_diffusion_version}")
-    stable = BoxDiffPipeline.from_pretrained(stable_diffusion_version).to(device)
+    stable = BoxDiffPipeline.from_pretrained(stable_diffusion_version,torch_dtype=torch.float16 ).to(device)
 
     return stable
 
@@ -55,6 +55,8 @@ def run_on_prompt(prompt: List[str],
     # if controller is not None:
     #     ptp_utils.register_attention_control(model, controller)
     outputs = model(prompt=prompt,
+                    height= 512,
+                    width=512,
                     attention_store=controller,
                     indices_to_alter=token_indices,
                     attention_res=config.attention_res,
@@ -71,6 +73,7 @@ def run_on_prompt(prompt: List[str],
                     kernel_size=config.kernel_size,
                     sd_2_1=config.sd_2_1,
                     bbox=config.bbox,
+                    weight_loss= config.weight_loss,
                     config=config)
     image = outputs.images[0]
     return image

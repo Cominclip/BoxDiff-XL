@@ -6,8 +6,7 @@ import torch
 from IPython.display import display
 from PIL import Image
 from typing import Union, Tuple, List
-
-from diffusers.models.cross_attention import CrossAttention
+from diffusers.models.attention import Attention as CrossAttention
 
 def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
     h, w, c = image.shape
